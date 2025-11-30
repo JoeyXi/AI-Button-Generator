@@ -16,13 +16,18 @@ import {
   AlertCircle,
   Zap,
   Cpu,
-  Brain
+  Brain,
+  Shield,
+  Server,
+  Globe,
+  Lock
 } from 'lucide-react';
 import { GoogleGenAI } from "@google/genai";
 
 // --- Types ---
 
 type AIProvider = 'gemini' | 'openai' | 'anthropic';
+type ConnectionMode = 'direct' | 'proxy';
 
 interface AIModel {
   id: string;
@@ -31,6 +36,7 @@ interface AIModel {
   endpoint: string;
   apiKey: string;
   modelParam: string;
+  connectionMode: ConnectionMode;
 }
 
 interface ButtonStyle {
@@ -134,6 +140,7 @@ const DEFAULT_MODELS: AIModel[] = [
     endpoint: 'https://generativelanguage.googleapis.com/v1beta',
     apiKey: process.env.API_KEY || '',
     modelParam: 'gemini-2.5-flash',
+    connectionMode: 'direct'
   }
 ];
 
@@ -241,15 +248,23 @@ function App() {
               {selectedModel && (
                 <div className="text-xs text-gray-500 bg-gray-50 p-3 rounded-lg border border-gray-200">
                   <div className="flex items-center justify-between mb-2">
+                    <span className="font-medium text-gray-700">Connection Mode</span>
+                    {selectedModel.connectionMode === 'proxy' ? (
+                       <span className="flex items-center gap-1 text-green-700 bg-green-50 border border-green-200 px-1.5 py-0.5 rounded text-[10px] font-bold tracking-wide">
+                          <Lock size={10} /> SECURE PROXY
+                       </span>
+                    ) : (
+                       <span className="flex items-center gap-1 text-amber-700 bg-amber-50 border border-amber-200 px-1.5 py-0.5 rounded text-[10px] font-bold tracking-wide">
+                          <Globe size={10} /> DIRECT API
+                       </span>
+                    )}
+                  </div>
+                  <div className="flex items-center justify-between mb-2">
                     <span className="font-medium text-gray-700">Provider</span>
                     <span className="uppercase bg-white border border-gray-200 px-1.5 py-0.5 rounded text-[10px] tracking-wide">{selectedModel.provider}</span>
                   </div>
-                  <div className="flex items-center justify-between mb-2">
-                    <span className="font-medium text-gray-700">Model Param</span>
-                    <span className="font-mono text-gray-600">{selectedModel.modelParam}</span>
-                  </div>
                   <div className="mt-2 pt-2 border-t border-gray-200">
-                    <span className="font-medium text-gray-700 block mb-1">Endpoint</span>
+                    <span className="font-medium text-gray-700 block mb-1">Target Endpoint</span>
                     <span className="font-mono bg-white px-1.5 py-1 rounded border border-gray-200 break-all block text-[10px] leading-relaxed">
                       {selectedModel.endpoint}
                     </span>
@@ -473,9 +488,24 @@ function LivePreviewWidget({ style, model }: { style: ButtonStyle, model: AIMode
          });
          responseText = response.text || "No response text.";
       } else {
-         // For custom endpoints, we simulate to avoid CORS errors in preview
+         // For custom endpoints or proxies, we simulate in preview to avoid CORS errors unless it's a real proxy
          await new Promise(resolve => setTimeout(resolve, 1500));
-         responseText = `[Simulation Mode]
+         
+         if (model.connectionMode === 'proxy') {
+             responseText = `[Proxy Simulation]
+             
+I would have sent this JSON payload to your server at: 
+${model.endpoint}
+
+{
+  "messages": [
+    { "role": "user", "content": "${userMsg.content}" }
+  ]
+}
+
+Since this is a preview, I'm just echoing back.`;
+         } else {
+             responseText = `[Direct API Simulation]
          
 I received your message: "${userMsg.content}".
 
@@ -483,6 +513,7 @@ Since I am running in a preview sandbox, I cannot make cross-origin requests to:
 ${model.endpoint}
 
 However, the generated code you copy will work perfectly on your live site if the API supports it!`;
+         }
       }
 
       setMessages(prev => [...prev, { role: 'assistant', content: responseText }]);
@@ -579,7 +610,7 @@ However, the generated code you copy will work perfectly on your live site if th
             </button>
           </div>
           <div className="text-center mt-2 flex items-center justify-center gap-1 opacity-40">
-            <Settings size={10} />
+            {model.connectionMode === 'proxy' ? <Lock size={10} className="text-green-600"/> : <Settings size={10} />}
             <span className="text-[10px] font-medium">Powered by {model.provider}</span>
           </div>
         </div>
@@ -621,7 +652,9 @@ function ModelManagerModal({
   const [editingModel, setEditingModel] = useState<Partial<AIModel>>({});
   
   const handleSave = () => {
-    if (!editingModel.name || !editingModel.apiKey) return;
+    if (!editingModel.name) return;
+    if (editingModel.connectionMode === 'direct' && !editingModel.apiKey) return;
+    if (editingModel.connectionMode === 'proxy' && !editingModel.endpoint) return;
     
     // Simple endpoint clean up
     let cleanEndpoint = editingModel.endpoint?.trim() || '';
@@ -629,8 +662,8 @@ function ModelManagerModal({
       cleanEndpoint = cleanEndpoint.slice(0, -1);
     }
 
-    // Defaults if missing
-    if (!cleanEndpoint) {
+    // Defaults if missing for direct mode
+    if (editingModel.connectionMode === 'direct' && !cleanEndpoint) {
         if (editingModel.provider === 'gemini') cleanEndpoint = 'https://generativelanguage.googleapis.com/v1beta';
         else if (editingModel.provider === 'anthropic') cleanEndpoint = 'https://api.anthropic.com/v1/messages';
         else cleanEndpoint = 'https://api.openai.com/v1/chat/completions';
@@ -641,8 +674,9 @@ function ModelManagerModal({
       name: editingModel.name,
       provider: editingModel.provider || 'openai',
       endpoint: cleanEndpoint,
-      apiKey: editingModel.apiKey,
+      apiKey: editingModel.apiKey || '', // Can be empty if proxy
       modelParam: editingModel.modelParam || (editingModel.provider === 'gemini' ? 'gemini-2.5-flash' : 'gpt-3.5-turbo'),
+      connectionMode: editingModel.connectionMode || 'direct'
     };
 
     if (editingModel.id) {
@@ -669,6 +703,7 @@ function ModelManagerModal({
           provider: preset.provider,
           endpoint: preset.endpoint,
           modelParam: preset.model,
+          connectionMode: 'direct'
       });
       setView('edit');
   };
@@ -677,14 +712,15 @@ function ModelManagerModal({
     setEditingModel({
       provider: 'openai',
       endpoint: 'https://api.openai.com/v1/chat/completions',
-      modelParam: 'gpt-4o'
+      modelParam: 'gpt-4o',
+      connectionMode: 'direct'
     });
     setView('edit');
   };
 
   return (
     <div className="fixed inset-0 z-[100] bg-black/50 backdrop-blur-sm flex items-center justify-center p-4">
-      <div className="bg-white rounded-xl shadow-2xl w-full max-w-2xl overflow-hidden flex flex-col max-h-[85vh] animate-in fade-in zoom-in duration-200">
+      <div className="bg-white rounded-xl shadow-2xl w-full max-w-2xl overflow-hidden flex flex-col max-h-[90vh] animate-in fade-in zoom-in duration-200">
         <div className="px-6 py-4 border-b border-gray-100 flex justify-between items-center bg-gray-50">
           <div className="flex items-center gap-2">
             {view !== 'list' && (
@@ -707,6 +743,7 @@ function ModelManagerModal({
                   <div className="flex-1 min-w-0 pr-4">
                      <div className="flex items-center gap-2 mb-1">
                        <h4 className="font-semibold text-gray-900 truncate">{model.name}</h4>
+                       {model.connectionMode === 'proxy' && <span className="text-[10px] bg-green-100 text-green-700 px-2 py-0.5 rounded-full font-bold flex items-center gap-1"><Lock size={8}/> PROXY</span>}
                        {model.id === 'default-gemini' && <span className="text-[10px] bg-blue-100 text-blue-700 px-2 py-0.5 rounded-full font-medium">System</span>}
                      </div>
                      <div className="flex items-center gap-3 text-xs text-gray-500">
@@ -770,6 +807,7 @@ function ModelManagerModal({
               </div>
           ) : (
             <div className="space-y-5 bg-white p-1 rounded-lg">
+              {/* Common Fields */}
               <div>
                 <label className="block text-xs font-bold text-gray-500 uppercase mb-1.5">Friendly Name</label>
                 <input 
@@ -779,21 +817,57 @@ function ModelManagerModal({
                   placeholder="e.g. My GPT-4"
                 />
               </div>
+
+              {/* Mode Toggle */}
+              <div>
+                  <label className="block text-xs font-bold text-gray-500 uppercase mb-2">Security & Connection</label>
+                  <div className="grid grid-cols-2 gap-2 p-1 bg-gray-100 rounded-lg">
+                      <button 
+                        onClick={() => setEditingModel({...editingModel, connectionMode: 'direct'})}
+                        className={`py-2 px-3 rounded-md text-sm font-medium flex items-center justify-center gap-2 transition-all ${
+                            (editingModel.connectionMode || 'direct') === 'direct' 
+                            ? 'bg-white text-indigo-700 shadow-sm' 
+                            : 'text-gray-500 hover:text-gray-700'
+                        }`}
+                      >
+                          <Globe size={14} /> Direct API
+                      </button>
+                      <button 
+                         onClick={() => setEditingModel({...editingModel, connectionMode: 'proxy', endpoint: ''})} // Clear endpoint when switching to proxy as defaults differ
+                         className={`py-2 px-3 rounded-md text-sm font-medium flex items-center justify-center gap-2 transition-all ${
+                            editingModel.connectionMode === 'proxy' 
+                            ? 'bg-white text-green-700 shadow-sm' 
+                            : 'text-gray-500 hover:text-gray-700'
+                         }`}
+                      >
+                          <Lock size={14} /> Backend Proxy
+                      </button>
+                  </div>
+                  <p className="text-[11px] text-gray-500 mt-2 px-1">
+                      {editingModel.connectionMode === 'proxy' 
+                        ? 'Secure mode. The widget sends messages to your server, which then calls the AI provider. No API keys are exposed.' 
+                        : 'Test mode. The widget connects directly to the AI provider. Your API key will be visible in the browser source code.'}
+                  </p>
+              </div>
+
+              {/* Provider & Model Param */}
               <div className="grid grid-cols-2 gap-4">
                 <div>
-                  <label className="block text-xs font-bold text-gray-500 uppercase mb-1.5">Provider Type</label>
+                  <label className="block text-xs font-bold text-gray-500 uppercase mb-1.5">Provider Protocol</label>
                   <select 
                     className="w-full p-3 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-indigo-500 outline-none bg-white"
                     value={editingModel.provider || 'openai'}
                     onChange={e => setEditingModel({
                         ...editingModel, 
                         provider: e.target.value as any,
-                        // Reset defaults when switching provider
-                        endpoint: e.target.value === 'gemini' 
+                        // Reset defaults when switching provider ONLY if Direct mode
+                        endpoint: editingModel.connectionMode === 'direct' ? (
+                            e.target.value === 'gemini' 
                             ? 'https://generativelanguage.googleapis.com/v1beta' 
                             : e.target.value === 'anthropic' 
                                 ? 'https://api.anthropic.com/v1/messages'
-                                : 'https://api.openai.com/v1/chat/completions',
+                                : 'https://api.openai.com/v1/chat/completions'
+                        ) : editingModel.endpoint,
                         modelParam: e.target.value === 'gemini' ? 'gemini-2.5-flash' : (e.target.value === 'anthropic' ? 'claude-3-5-sonnet-20241022' : 'gpt-4o')
                     })}
                   >
@@ -812,31 +886,53 @@ function ModelManagerModal({
                   />
                 </div>
               </div>
-              <div>
-                <label className="block text-xs font-bold text-gray-500 uppercase mb-1.5">API Endpoint</label>
-                <input 
-                  className="w-full p-3 border border-gray-300 rounded-lg text-sm font-mono text-gray-600 focus:ring-2 focus:ring-indigo-500 outline-none"
-                  value={editingModel.endpoint || ''}
-                  onChange={e => setEditingModel({...editingModel, endpoint: e.target.value})}
-                  placeholder="https://..."
-                />
-              </div>
-              <div>
-                <label className="block text-xs font-bold text-gray-500 uppercase mb-1.5">API Key</label>
-                <div className="relative">
-                    <input 
-                    type="password"
-                    className="w-full p-3 border border-gray-300 rounded-lg text-sm font-mono focus:ring-2 focus:ring-indigo-500 outline-none"
-                    value={editingModel.apiKey || ''}
-                    onChange={e => setEditingModel({...editingModel, apiKey: e.target.value})}
-                    placeholder="sk-..."
-                    />
-                </div>
-                <p className="text-[11px] text-gray-400 mt-2 flex items-center gap-1">
-                  <AlertCircle size={12} />
-                  Stored locally for generation. Never shared with us.
-                </p>
-              </div>
+              
+              {/* Endpoint & Key Logic based on Mode */}
+              {editingModel.connectionMode === 'proxy' ? (
+                  <div className="bg-green-50 border border-green-100 p-4 rounded-lg space-y-3">
+                      <div>
+                        <label className="block text-xs font-bold text-green-800 uppercase mb-1.5">Your Proxy URL</label>
+                        <input 
+                            className="w-full p-3 border border-green-200 rounded-lg text-sm font-mono text-gray-700 focus:ring-2 focus:ring-green-500 outline-none"
+                            value={editingModel.endpoint || ''}
+                            onChange={e => setEditingModel({...editingModel, endpoint: e.target.value})}
+                            placeholder="https://your-server.com/api/chat"
+                        />
+                      </div>
+                      <div className="text-[11px] text-green-800 bg-white p-3 rounded border border-green-100 font-mono overflow-x-auto">
+                          <div className="font-bold mb-1 opacity-70">Frontend will send this JSON:</div>
+                          {`{ "messages": [{ "role": "user", "content": "..." }] }`}
+                      </div>
+                  </div>
+              ) : (
+                  <div className="space-y-4">
+                     <div>
+                        <label className="block text-xs font-bold text-gray-500 uppercase mb-1.5">API Endpoint</label>
+                        <input 
+                        className="w-full p-3 border border-gray-300 rounded-lg text-sm font-mono text-gray-600 focus:ring-2 focus:ring-indigo-500 outline-none"
+                        value={editingModel.endpoint || ''}
+                        onChange={e => setEditingModel({...editingModel, endpoint: e.target.value})}
+                        placeholder="https://..."
+                        />
+                     </div>
+                     <div>
+                        <label className="block text-xs font-bold text-gray-500 uppercase mb-1.5">API Key</label>
+                        <div className="relative">
+                            <input 
+                            type="password"
+                            className="w-full p-3 border border-gray-300 rounded-lg text-sm font-mono focus:ring-2 focus:ring-indigo-500 outline-none bg-amber-50 border-amber-200"
+                            value={editingModel.apiKey || ''}
+                            onChange={e => setEditingModel({...editingModel, apiKey: e.target.value})}
+                            placeholder="sk-..."
+                            />
+                        </div>
+                        <p className="text-[11px] text-amber-600 mt-2 flex items-center gap-1 font-medium">
+                        <AlertCircle size={12} />
+                        Warning: This key will be exposed in the frontend code.
+                        </p>
+                     </div>
+                  </div>
+              )}
 
               <div className="flex gap-3 pt-6 mt-4 border-t border-gray-100">
                 <button 
@@ -865,15 +961,23 @@ function CodeExportModal({ style, model, onClose }: { style: ButtonStyle, model:
 
   // Generate the actual JS code snippet
   const generateSnippet = () => {
-    // We sanitize strings to prevent trivial injection, though this is a client-side tool.
     const safeStyle = JSON.stringify(style);
-    const safeModel = JSON.stringify({
+    
+    // Logic to determine what to expose in the config
+    const safeModelConfig: any = {
        provider: model.provider,
        endpoint: model.endpoint,
-       apiKey: model.apiKey,
        modelParam: model.modelParam,
-       name: model.name
-    });
+       name: model.name,
+       connectionMode: model.connectionMode
+    };
+
+    // ONLY include API key if in Direct mode
+    if (model.connectionMode === 'direct') {
+        safeModelConfig.apiKey = model.apiKey;
+    }
+
+    const safeModel = JSON.stringify(safeModelConfig);
 
     return `<!-- AI Button Widget Code -->
 <script>
@@ -988,44 +1092,64 @@ function CodeExportModal({ style, model, onClose }: { style: ButtonStyle, model:
 
     try {
       let reply = '';
-      let fetchUrl = config.model.endpoint;
-      let headers = { 'Content-Type': 'application/json' };
-      let body = {};
-
-      if (config.model.provider === 'openai') {
-           headers['Authorization'] = 'Bearer ' + config.model.apiKey;
-           body = {
-             model: config.model.modelParam,
-             messages: [{ role: 'user', content: text }]
-           };
-      } else if (config.model.provider === 'gemini') {
-           fetchUrl = \`\${config.model.endpoint}/models/\${config.model.modelParam}:generateContent?key=\${config.model.apiKey}\`;
-           body = { contents: [{ parts: [{ text: text }] }] };
-      } else if (config.model.provider === 'anthropic') {
-           headers['x-api-key'] = config.model.apiKey;
-           headers['anthropic-version'] = '2023-06-01';
-           headers['dangerously-allow-browser'] = 'true'; // Often needed for client-side demo, but risky in prod.
-           body = {
-             model: config.model.modelParam,
-             max_tokens: 1024,
-             messages: [{ role: 'user', content: text }]
-           };
-      }
-
-      const response = await fetch(fetchUrl, {
-          method: 'POST',
-          headers,
-          body: JSON.stringify(body)
-      });
-        
-      const data = await response.json();
       
-      if (config.model.provider === 'openai') {
-          reply = data.choices?.[0]?.message?.content || data.error?.message || 'Error: No response';
-      } else if (config.model.provider === 'gemini') {
-          reply = data.candidates?.[0]?.content?.parts?.[0]?.text || data.error?.message || 'Error: No response';
-      } else if (config.model.provider === 'anthropic') {
-          reply = data.content?.[0]?.text || data.error?.message || 'Error: No response';
+      // --- SECURE PROXY MODE ---
+      if (config.model.connectionMode === 'proxy') {
+         // In proxy mode, we send a standardized JSON to the user's server.
+         // The user's server is responsible for authentication and calling the AI.
+         const response = await fetch(config.model.endpoint, {
+             method: 'POST',
+             headers: { 'Content-Type': 'application/json' },
+             body: JSON.stringify({ 
+                 messages: [{ role: 'user', content: text }],
+                 model: config.model.modelParam // Optional: Pass model intent to backend
+             })
+         });
+         const data = await response.json();
+         // Expecting standard { content: "..." } or OpenAI style response
+         reply = data.content || data.choices?.[0]?.message?.content || data.output || "Error: Unknown response format";
+      
+      } else {
+        // --- DIRECT MODE (Existing Logic) ---
+        let fetchUrl = config.model.endpoint;
+        let headers = { 'Content-Type': 'application/json' };
+        let body = {};
+
+        if (config.model.provider === 'openai') {
+            headers['Authorization'] = 'Bearer ' + config.model.apiKey;
+            body = {
+                model: config.model.modelParam,
+                messages: [{ role: 'user', content: text }]
+            };
+        } else if (config.model.provider === 'gemini') {
+            fetchUrl = \`\${config.model.endpoint}/models/\${config.model.modelParam}:generateContent?key=\${config.model.apiKey}\`;
+            body = { contents: [{ parts: [{ text: text }] }] };
+        } else if (config.model.provider === 'anthropic') {
+            headers['x-api-key'] = config.model.apiKey;
+            headers['anthropic-version'] = '2023-06-01';
+            headers['dangerously-allow-browser'] = 'true';
+            body = {
+                model: config.model.modelParam,
+                max_tokens: 1024,
+                messages: [{ role: 'user', content: text }]
+            };
+        }
+
+        const response = await fetch(fetchUrl, {
+            method: 'POST',
+            headers,
+            body: JSON.stringify(body)
+        });
+            
+        const data = await response.json();
+        
+        if (config.model.provider === 'openai') {
+            reply = data.choices?.[0]?.message?.content || data.error?.message || 'Error: No response';
+        } else if (config.model.provider === 'gemini') {
+            reply = data.candidates?.[0]?.content?.parts?.[0]?.text || data.error?.message || 'Error: No response';
+        } else if (config.model.provider === 'anthropic') {
+            reply = data.content?.[0]?.text || data.error?.message || 'Error: No response';
+        }
       }
       
       messagesArea.removeChild(typingIndicator);
@@ -1121,9 +1245,29 @@ function CodeExportModal({ style, model, onClose }: { style: ButtonStyle, model:
         </div>
         
         <div className="p-6 overflow-y-auto bg-gray-50 flex-1">
-          <p className="text-sm text-gray-600 mb-4">
-            Copy and paste this code before the closing <code className="bg-gray-200 px-1.5 py-0.5 rounded text-red-500 font-mono text-xs">&lt;/body&gt;</code> tag of your website.
-          </p>
+          {model.connectionMode === 'direct' ? (
+              <div className="mb-4 bg-amber-50 border border-amber-200 p-4 rounded-lg flex gap-3">
+                <div className="text-amber-600 mt-0.5"><AlertCircle size={18} /></div>
+                <div>
+                  <h4 className="text-sm font-semibold text-amber-800">Security Warning</h4>
+                  <p className="text-xs text-amber-700 mt-1 leading-relaxed">
+                    You are in <strong>Direct API Mode</strong>. Your API Key is included in the code below. 
+                    This is suitable for testing, internal tools, or if you use restricted keys (allowed domains only).
+                    For public websites, switch to <strong>Proxy Mode</strong> in the Model Manager.
+                  </p>
+                </div>
+              </div>
+          ) : (
+             <div className="mb-4 bg-green-50 border border-green-200 p-4 rounded-lg flex gap-3">
+                <div className="text-green-600 mt-0.5"><Lock size={18} /></div>
+                <div>
+                  <h4 className="text-sm font-semibold text-green-800">Secure Mode Active</h4>
+                  <p className="text-xs text-green-700 mt-1 leading-relaxed">
+                    Your API Key is NOT included. The widget will send requests to your proxy at <span className="font-mono bg-green-100 px-1 rounded">{model.endpoint}</span>.
+                  </p>
+                </div>
+              </div>
+          )}
           
           <div className="relative group">
             <pre className="bg-gray-900 text-gray-100 p-4 rounded-lg text-xs font-mono overflow-x-auto whitespace-pre-wrap leading-relaxed border border-gray-800 shadow-inner">
@@ -1136,16 +1280,8 @@ function CodeExportModal({ style, model, onClose }: { style: ButtonStyle, model:
               {copied ? <Check size={16} className="text-green-400"/> : <Copy size={16} />}
             </button>
           </div>
-
-          <div className="mt-6 bg-amber-50 border border-amber-200 p-4 rounded-lg flex gap-3">
-             <div className="text-amber-600 mt-0.5"><Bot size={18} /></div>
-             <div>
-               <h4 className="text-sm font-semibold text-amber-800">Security Note</h4>
-               <p className="text-xs text-amber-700 mt-1 leading-relaxed">
-                 This code runs entirely in the visitor's browser (Client-Side). Your API Key will be visible in the source code. 
-                 For production websites, it is highly recommended to proxy requests through your own backend server or restrict your API key usage to specific domains in your provider's dashboard.
-               </p>
-             </div>
+          <div className="mt-2 text-center text-xs text-gray-400">
+             Paste this before the <code className="bg-gray-200 px-1 py-0.5 rounded text-gray-600">&lt;/body&gt;</code> tag.
           </div>
         </div>
         
